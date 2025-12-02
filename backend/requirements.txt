@@ -1,0 +1,11 @@
+fastapi
+pymongo
+uvicorn
+python-multipart
+langchain
+groq
+python-dotenv
+plotly
+matplotlib
+pandas
+sqlalchemy
