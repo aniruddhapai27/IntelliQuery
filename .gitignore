@@ -26,3 +26,7 @@ dist-ssr
 
 __pycache__/
 intelenv/
+.github/
+data/
+notebooks/
+.env
