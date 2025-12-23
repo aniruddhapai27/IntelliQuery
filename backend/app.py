@@ -7,6 +7,7 @@ import uvicorn
 
 from auth.middleware import AuthMiddleware
 from auth.router import router as auth_router
+from datasources.router import router as datasources_router
 from auth.store import ensure_indexes
 from utils.db import ping_db
 
@@ -26,6 +27,7 @@ if cors_origins:
 
 app.add_middleware(AuthMiddleware)
 app.include_router(auth_router)
+app.include_router(datasources_router)
 
 
 @app.on_event("startup")
