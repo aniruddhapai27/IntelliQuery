@@ -1,0 +1,21 @@
+Apis done:
+
+auth:
+    auth/register , params = {username, email, password}
+    auth/login , params = {email, password}
+    auth/logout , get req 
+
+
+dbconnection:
+    datasources/  , get all the saved sources for the current user
+    datasources/sql/connect, params = {type("mysql", "psql"), host, port, username, password, database}
+    datasources/mongo/connect, params = {uri, database}
+    datasources/pandas/upload, params = excel/csv file upload 
+
+
+todos:
+    agenets
+    visualisation  agents
+    nocode sql interface
+    iframes
+       
