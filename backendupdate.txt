@@ -13,8 +13,13 @@ dbconnection:
     datasources/pandas/upload, params = excel/csv file upload 
 
 
+Agent:
+    Just have to give the natural language and datascourceId.
+    you will get the data source id from datasources/ api.
+    As the selects previously created connection credentials , if not give him a option to create a new connection.
+    also added Groq cloud llm for the fall back response if the local fails to not there
+
 todos:
-    agenets
     visualisation  agents
     nocode sql interface
     iframes
