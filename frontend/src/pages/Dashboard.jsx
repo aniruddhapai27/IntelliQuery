@@ -42,6 +42,7 @@ const Dashboard = () => {
         </svg>
       ),
       color: "from-yellow-600 to-yellow-500",
+      routeType: "sql",
     },
     {
       title: "MongoDB Query",
@@ -62,6 +63,7 @@ const Dashboard = () => {
         </svg>
       ),
       color: "from-yellow-500 to-yellow-400",
+      routeType: "mongo",
     },
     {
       title: "Spreadsheet Analysis",
@@ -82,26 +84,7 @@ const Dashboard = () => {
         </svg>
       ),
       color: "from-yellow-400 to-yellow-600",
-    },
-    {
-      title: "Voice Query",
-      description: "Use voice commands",
-      icon: (
-        <svg
-          className="w-8 h-8"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-          />
-        </svg>
-      ),
-      color: "from-yellow-600 to-yellow-400",
+      routeType: "spreadsheet",
     },
   ];
 
@@ -237,7 +220,13 @@ const Dashboard = () => {
           <h2 className="text-2xl font-bold text-white mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {quickActions.map((action, index) => (
-              <Card key={index} hover>
+              <Card
+                key={index}
+                hover
+                onClick={() =>
+                  navigate(`/datasource/${action.routeType}/setup`)
+                }
+              >
                 <div
                   className={`w-14 h-14 bg-gradient-to-br ${action.color} rounded-lg flex items-center justify-center mb-4 text-black`}
                 >
@@ -249,7 +238,14 @@ const Dashboard = () => {
                 <p className="text-gray-400 text-sm mb-4">
                   {action.description}
                 </p>
-                <Button variant="ghost" className="w-full">
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/datasource/${action.routeType}/setup`);
+                  }}
+                >
                   Start Query
                 </Button>
               </Card>

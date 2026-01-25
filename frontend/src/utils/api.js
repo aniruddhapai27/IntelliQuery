@@ -24,6 +24,18 @@ export const datasourceAPI = {
   getAll: () => api.get("/datasources"),
   create: (data) => api.post("/datasources", data),
   delete: (id) => api.delete(`/datasources/${id}`),
+
+  connectSql: (data) => api.post("/datasources/sql/connect", data),
+  connectMongo: (data) => api.post("/datasources/mongo/connect", data),
+  uploadPandas: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/datasources/pandas/upload", form, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  },
 };
 
 // AI query endpoints

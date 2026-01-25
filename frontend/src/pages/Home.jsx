@@ -1,9 +1,20 @@
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 
 const Home = () => {
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (raw) setUser(JSON.parse(raw));
+    } catch (e) {
+      setUser(null);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-black">
@@ -28,15 +39,37 @@ const Home = () => {
               <span className="text-yellow-400"> No code required.</span>
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button
-                onClick={() => navigate("/register")}
-                className="text-lg px-8 py-4"
-              >
-                Get Started Free
-              </Button>
-              <Button variant="ghost" className="text-lg">
-                Watch Demo
-              </Button>
+              {!user ? (
+                <>
+                  <Button
+                    onClick={() => navigate("/register")}
+                    className="text-lg px-8 py-4"
+                  >
+                    Get Started Free
+                  </Button>
+                  <Button variant="ghost" className="text-lg">
+                    Watch Demo
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => navigate("/dashboard")}
+                    className="text-lg px-8 py-4"
+                  >
+                    Go to Dashboard
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      localStorage.removeItem("user");
+                      navigate("/login");
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -142,26 +175,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        <Card className="bg-gradient-to-r from-yellow-600/20 to-yellow-500/20 border-yellow-500/50">
-          <div className="text-center">
-            <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-              Ready to Transform Your Data Analytics?
-            </h2>
-            <p className="text-gray-300 text-lg mb-8 max-w-2xl mx-auto">
-              Join thousands of analysts and teams using IntelliQuery to make
-              data-driven decisions faster.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button onClick={() => navigate("/register")}>
-                Get Started Free
-              </Button>
-              <Button variant="ghost">View Documentation</Button>
-            </div>
-          </div>
-        </Card>
-      </section>
+      {/* CTA removed as requested */}
 
       {/* Stats Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">

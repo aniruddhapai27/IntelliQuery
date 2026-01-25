@@ -16,6 +16,8 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
+import DataSourceSetup from "./pages/DataSourceSetup";
+import QueryPage from "./pages/QueryPage";
 import NotFound from "./pages/NotFound";
 
 function App() {
@@ -74,6 +76,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/datasource/:type/setup"
+              element={
+                <ProtectedRoute>
+                  <DataSourceSetup />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/datasource/:type/query"
+              element={
+                <ProtectedRoute>
+                  <QueryPage />
                 </ProtectedRoute>
               }
             />
