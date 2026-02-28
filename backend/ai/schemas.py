@@ -86,3 +86,32 @@ class AutocompleteResponse(BaseModel):
     suggestions: List[str]
     partial_query: str
     error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Export schemas
+# ---------------------------------------------------------------------------
+
+class ExportCSVRequest(BaseModel):
+    """Request schema for exporting query results as CSV."""
+    results: List[Dict[str, Any]]
+    columns: Optional[List[str]] = None
+    filename: Optional[str] = "query_results.csv"
+
+
+class EmailExportRequest(BaseModel):
+    """Request schema for emailing query results and chart to recipients."""
+    recipients: List[str]
+    results: List[Dict[str, Any]]
+    columns: Optional[List[str]] = None
+    chart_data: Optional[Dict[str, Any]] = None  # Plotly JSON figure
+    query_context: Optional[str] = None  # Original natural language query
+    subject: Optional[str] = None  # Custom email subject
+
+
+class EmailExportResponse(BaseModel):
+    """Response schema for email export."""
+    success: bool
+    message: str
+    recipients: List[str]
+    error: Optional[str] = None

@@ -1,6 +1,9 @@
 from typing import Dict, Any, List, Optional
 import logging
+import re
 from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi.responses import StreamingResponse
+import io
 
 from auth.dependencies import require_user
 from ai.schemas import (
@@ -11,7 +14,10 @@ from ai.schemas import (
     VisualizationGenerateRequest,
     VisualizationGenerateResponse,
     AutocompleteRequest,
-    AutocompleteResponse
+    AutocompleteResponse,
+    ExportCSVRequest,
+    EmailExportRequest,
+    EmailExportResponse,
 )
 from ai.ai_router import ai_router
 from ai.agents.visualization_agent import visualization_agent
@@ -22,6 +28,11 @@ from ai.history_store import (
     list_sessions,
     get_session_messages,
     delete_session,
+)
+from utils.email_service import (
+    results_to_csv_bytes,
+    send_results_email,
+    render_plotly_chart_to_png,
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -301,6 +312,166 @@ async def clear_autocomplete_cache(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to clear cache: {str(e)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Export endpoints
+# ---------------------------------------------------------------------------
+
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
+
+@router.post("/export/csv")
+async def export_csv(
+    request: ExportCSVRequest,
+    user: dict = Depends(require_user),
+):
+    """
+    Export query results as a downloadable CSV file.
+
+    Accepts the results list-of-dicts returned by /ai/query.
+    Returns a streaming CSV response (UTF-8 with BOM for Excel).
+    """
+    if not request.results:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No results to export.",
+        )
+
+    csv_bytes = results_to_csv_bytes(request.results, request.columns)
+
+    filename = request.filename or "query_results.csv"
+    if not filename.endswith(".csv"):
+        filename += ".csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.post("/export/email", response_model=EmailExportResponse)
+async def export_email(
+    request: EmailExportRequest,
+    user: dict = Depends(require_user),
+) -> EmailExportResponse:
+    """
+    Send query results (CSV) and optional chart image to email recipients.
+
+    Validation rules:
+    - At least one recipient is required.
+    - Maximum 10 recipients per request.
+    - All recipient addresses must be valid email format.
+    - The logged-in user's own email is NOT allowed as a recipient.
+    - Results must not be empty.
+    """
+    # --- Validate recipients list ---
+    if not request.recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one recipient email is required.",
+        )
+
+    if len(request.recipients) > 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 10 recipients allowed per request.",
+        )
+
+    user_email = (user.get("email") or "").lower().strip()
+    cleaned_recipients: list[str] = []
+
+    for addr in request.recipients:
+        addr = addr.strip().lower()
+
+        if not EMAIL_RE.match(addr):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid email address: {addr}",
+            )
+
+        if addr == user_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot send results to your own login email. Use a different recipient.",
+            )
+
+        if addr in cleaned_recipients:
+            continue  # deduplicate silently
+        cleaned_recipients.append(addr)
+
+    if not cleaned_recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid recipient emails after processing.",
+        )
+
+    # --- Validate results ---
+    if not request.results:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No results to send. Run a query first.",
+        )
+
+    # --- Build attachments ---
+    csv_bytes = results_to_csv_bytes(request.results, request.columns)
+
+    chart_image_bytes = None
+    if request.chart_data:
+        chart_image_bytes = render_plotly_chart_to_png(request.chart_data)
+
+    # --- Compose email ---
+    query_label = request.query_context or "IntelliQuery Results"
+    subject = request.subject or f"IntelliQuery – {query_label[:80]}"
+
+    row_count = len(request.results)
+    col_count = len(request.results[0]) if request.results else 0
+
+    body_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;">
+        <h2 style="color:#2563eb;">IntelliQuery – Query Results</h2>
+        <p><strong>Query:</strong> {query_label}</p>
+        <p><strong>Rows:</strong> {row_count} &nbsp;|&nbsp; <strong>Columns:</strong> {col_count}</p>
+        <hr/>
+        <p>The query results are attached as a CSV file.</p>
+        {"<p>A chart visualization is also attached as a PNG image.</p>" if chart_image_bytes else ""}
+        <br/>
+        <p style="color:#6b7280;font-size:12px;">
+            Sent via <strong>IntelliQuery</strong> by {user.get("username", "a team member")}.
+        </p>
+    </div>
+    """
+
+    # --- Send ---
+    try:
+        send_results_email(
+            recipients=cleaned_recipients,
+            subject=subject,
+            body_html=body_html,
+            csv_bytes=csv_bytes,
+            chart_image_bytes=chart_image_bytes,
+        )
+    except RuntimeError as exc:
+        # SMTP not configured
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error("Email send failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send email: {str(exc)}",
+        )
+
+    return EmailExportResponse(
+        success=True,
+        message=f"Results sent to {len(cleaned_recipients)} recipient(s).",
+        recipients=cleaned_recipients,
+    )
 
 
 # ---------------------------------------------------------------------------
