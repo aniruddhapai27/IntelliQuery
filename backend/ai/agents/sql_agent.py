@@ -114,6 +114,21 @@ class SQLAgent(BaseAgent):
             return False, "Multiple statements not allowed"
         
         return True, ""
+
+    def classify_normal_form(self, generated_query: str) -> str | None:
+        """
+        Classify SQL query shape using a simple heuristic:
+        - 2NF: single-table read query
+        - 3NF: multi-table read query (JOIN/comma join)
+        """
+        query_upper = generated_query.upper().strip()
+        if not (query_upper.startswith('SELECT') or query_upper.startswith('WITH')):
+            return None
+
+        has_explicit_join = bool(re.search(r'\bJOIN\b', query_upper))
+        has_comma_join = bool(re.search(r'\bFROM\b[\s\S]*?,[\s\S]*?\b(WHERE|GROUP BY|ORDER BY|LIMIT|$)', query_upper))
+
+        return "3NF" if (has_explicit_join or has_comma_join) else "2NF"
     
     async def execute_query(self, query: str, datasource: Dict[str, Any]) -> Tuple[bool, Any]:
         """

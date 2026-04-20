@@ -110,6 +110,7 @@ class AIRouter:
                 query=natural_query,
                 generated_query=result.get("generated_query", ""),
                 datasource_type=datasource_enum,
+                normal_form=result.get("normal_form"),
                 results=result.get("results"),
                 columns=result.get("columns"),
                 row_count=result.get("row_count"),
