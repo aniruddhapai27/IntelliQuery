@@ -1,12 +1,12 @@
 from ai.agents.sql_agent import SQLAgent
 
 
-def test_sql_normal_form_single_table_is_2nf():
+def test_sql_normal_form_single_table_returns_2nf():
     agent = SQLAgent()
     assert agent.classify_normal_form("SELECT id, name FROM customers LIMIT 10") == "2NF"
 
 
-def test_sql_normal_form_join_query_is_3nf():
+def test_sql_normal_form_join_query_returns_3nf():
     agent = SQLAgent()
     assert (
         agent.classify_normal_form(

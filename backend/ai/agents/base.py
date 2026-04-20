@@ -191,12 +191,11 @@ Pandas Code:"""
         
         # Validate read-only
         is_valid, validation_error = self.validate_readonly(generated_query)
-        normal_form = self.classify_normal_form(generated_query)
         if not is_valid:
             return {
                 "success": False,
                 "generated_query": generated_query,
-                "normal_form": normal_form,
+                "normal_form": self.classify_normal_form(generated_query),
                 "error": f"Query validation failed: {validation_error}",
                 "llm_used": llm_used
             }

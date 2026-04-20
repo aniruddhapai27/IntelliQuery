@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from sqlalchemy import create_engine, text, inspect
@@ -115,18 +115,39 @@ class SQLAgent(BaseAgent):
         
         return True, ""
 
-    def classify_normal_form(self, generated_query: str) -> str | None:
+    def classify_normal_form(self, generated_query: str) -> Optional[str]:
         """
-        Classify SQL query shape using a simple heuristic:
-        - 2NF: single-table read query
-        - 3NF: multi-table read query (JOIN/comma join)
+        Heuristic SQL query-shape label used for UI-only guidance:
+        - 2NF: single-table read query shape
+        - 3NF: multi-table read query shape (JOIN/comma join)
+        - None: non-read queries that do not start with SELECT/WITH
+        This is not a true schema normalization validator.
         """
         query_upper = generated_query.upper().strip()
         if not (query_upper.startswith('SELECT') or query_upper.startswith('WITH')):
             return None
 
         has_explicit_join = bool(re.search(r'\bJOIN\b', query_upper))
-        has_comma_join = bool(re.search(r'\bFROM\b[\s\S]*?,[\s\S]*?\b(WHERE|GROUP BY|ORDER BY|LIMIT|$)', query_upper))
+        has_comma_join = False
+        from_match = re.search(r'\bFROM\b(.*)', query_upper, flags=re.DOTALL)
+        if from_match:
+            from_segment = from_match.group(1)
+            table_segment = re.split(
+                r'\bWHERE\b|\bGROUP BY\b|\bORDER BY\b|\bLIMIT\b|\bHAVING\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b',
+                from_segment,
+                maxsplit=1
+            )[0]
+            # Ignore commas inside parentheses (subqueries/functions)
+            top_level_segment = []
+            depth = 0
+            for ch in table_segment:
+                if ch == '(':
+                    depth += 1
+                elif ch == ')' and depth > 0:
+                    depth -= 1
+                elif depth == 0:
+                    top_level_segment.append(ch)
+            has_comma_join = ',' in ''.join(top_level_segment)
 
         return "3NF" if (has_explicit_join or has_comma_join) else "2NF"
     
