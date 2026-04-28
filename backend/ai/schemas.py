@@ -22,6 +22,7 @@ class QueryResponse(BaseModel):
     query: str  # The natural language query
     generated_query: str  # SQL/MongoDB/Pandas query generated
     datasource_type: DataSourceType
+    normal_form: Optional[str] = None  # SQL-only heuristic label (2NF/3NF)
     results: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
     columns: Optional[List[str]] = None
     row_count: Optional[int] = None
