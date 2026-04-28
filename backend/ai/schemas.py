@@ -23,6 +23,7 @@ class QueryResponse(BaseModel):
     query: str  # The natural language query
     generated_query: str  # SQL/MongoDB/Pandas query generated
     datasource_type: DataSourceType
+    normal_form: Optional[str] = None  # SQL-only heuristic label (2NF/3NF)
     results: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
     columns: Optional[List[str]] = None
     row_count: Optional[int] = None
@@ -109,6 +110,7 @@ class EmailResultsRequest(BaseModel):
     results: List[Dict[str, Any]]
     columns: Optional[List[str]] = None
     chart_data: Optional[Dict[str, Any]] = None  # Plotly JSON figure
+    query_context: Optional[str] = None  # Original natural language query
     subject: Optional[str] = "IntelliQuery — Your Query Results"
     message: Optional[str] = None
 

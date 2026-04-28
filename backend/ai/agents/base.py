@@ -44,6 +44,10 @@ class BaseAgent(ABC):
         Returns (success, results_or_error)
         """
         pass
+
+    def classify_normal_form(self, generated_query: str) -> Optional[str]:
+        """Return a datasource-specific normal-form label when applicable."""
+        return None
     
     def build_prompt(self, natural_query: str, schema_context: str) -> str:
         """Build the prompt for the LLM."""
@@ -191,6 +195,7 @@ Pandas Code:"""
             return {
                 "success": False,
                 "generated_query": generated_query,
+                "normal_form": self.classify_normal_form(generated_query),
                 "error": f"Query validation failed: {validation_error}",
                 "llm_used": llm_used
             }
@@ -206,6 +211,7 @@ Pandas Code:"""
                 return {
                     "success": True,
                     "generated_query": last_query,
+                    "normal_form": self.classify_normal_form(last_query),
                     "results": result.get("data", []),
                     "columns": result.get("columns", []),
                     "row_count": result.get("row_count", 0),
@@ -243,6 +249,7 @@ Pandas Code:"""
         return {
             "success": False,
             "generated_query": last_query,
+            "normal_form": self.classify_normal_form(last_query),
             "error": str(result),
             "llm_used": llm_used
         }

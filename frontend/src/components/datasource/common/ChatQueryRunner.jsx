@@ -417,6 +417,9 @@ export default function ChatQueryRunner({
                         <span>Rows: {message.response.row_count}</span>
                       )}
                       <span>Type: {message.response.datasource_type}</span>
+                      {message.response.normal_form && (
+                        <span>Normalization: {message.response.normal_form}</span>
+                      )}
                     </div>
 
                     {/* Error if any */}
