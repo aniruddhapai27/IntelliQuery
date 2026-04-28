@@ -29,6 +29,7 @@ class QueryResponse(BaseModel):
     row_count: Optional[int] = None
     error: Optional[str] = None
     llm_used: str  # Which LLM was used (groq)
+    confidence: Optional[float] = None  # LLM Validation Confidence
     session_id: Optional[str] = None  # Returned so frontend can persist it
 
 

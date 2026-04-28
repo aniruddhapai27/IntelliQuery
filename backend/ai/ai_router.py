@@ -115,7 +115,8 @@ class AIRouter:
                 columns=result.get("columns"),
                 row_count=result.get("row_count"),
                 error=result.get("error"),
-                llm_used=result.get("llm_used", "none")
+                llm_used=result.get("llm_used", "none"),
+                confidence=result.get("confidence")
             )
             
         except ValueError as e:

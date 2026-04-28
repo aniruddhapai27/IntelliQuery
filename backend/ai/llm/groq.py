@@ -328,3 +328,80 @@ async def get_groq_completion(prompt: str, temperature: float = 0.3) -> str:
     except Exception as e:
         logger.error(f"Groq request failed: {e}")
         raise Exception(f"Failed to get Groq completion: {str(e)}")
+
+
+async def validate_query_with_llm(
+    natural_query: str,
+    generated_query: str,
+    query_type: str,
+    schema_context: str
+) -> dict:
+    """
+    Use an LLM as a secondary validator to check if the generated query correctly answers the user's natural language query.
+    Returns: {"is_valid": bool, "confidence": float, "feedback": str}
+    """
+    client = get_groq_client()
+    if not client:
+        return {"is_valid": True, "confidence": 1.0, "feedback": ""}
+
+    validator_model = "llama-3.3-70b-versatile"  # Use a stronger model for validation
+
+    system_prompt = f"""You are an expert {query_type.upper()} query validator for a data platform.
+Given a natural language query, a database/collection schema, and a generated {query_type.upper()} query or code, your task is to validate if the generated query correctly, safely, and optimally answers the user's natural language query using the provided schema.
+
+Consider:
+- Does the query use the correct tables/collections and columns/fields?
+- Is the logic correct for the requested aggregation, filtering, or sorting?
+- Are JOINs correct and complete?
+- Are there syntax errors or hallucinations of columns that don't exist?
+
+Respond with ONLY a JSON object (no markdown formatting, no code blocks) with the exact structure:
+{{
+    "is_valid": true,
+    "confidence": 0.95,
+    "feedback": "Your detailed feedback on what is wrong and how to fix it. Empty if perfectly valid."
+}}
+Ensure 'is_valid' is a boolean, 'confidence' is a float between 0.0 and 1.0, and 'feedback' is a string. If confidence is below 0.8 or is_valid is false, you must provide feedback."""
+
+    user_message = f"""Schema/Columns:
+{schema_context}
+
+Natural Language Query: {natural_query}
+
+Generated {query_type.upper()} Query / Code:
+{generated_query}
+
+Validate the query and return ONLY the JSON representation:"""
+
+    try:
+        completion = client.chat.completions.create(
+            model=validator_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.0,
+            max_completion_tokens=500,
+            top_p=1.0,
+            stream=False
+        )
+
+        if completion.choices and len(completion.choices) > 0:
+            import json
+            raw = completion.choices[0].message.content.strip()
+            # Clean possible markdown formatting
+            raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            
+            result = json.loads(raw)
+            return {
+                "is_valid": bool(result.get("is_valid", True)),
+                "confidence": float(result.get("confidence", 1.0)),
+                "feedback": str(result.get("feedback", ""))
+            }
+            
+    except Exception as e:
+        logger.warning(f"LLM validation failed, skipping validator check: {e}")
+
+    # Fallback if the validation fails
+    return {"is_valid": True, "confidence": 1.0, "feedback": ""}
+

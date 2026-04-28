@@ -396,9 +396,23 @@ export default function ChatQueryRunner({
 
                     {/* Generated Query */}
                     <div>
-                      <p className="text-xs text-gray-400 mb-1">
-                        Generated Query:
-                      </p>
+                      <div className="flex items-center space-x-2 text-xs text-gray-400 mb-1">
+                        <span>Generated Query:</span>
+                        {message.response.confidence && (
+                          <span
+                            title="LLM Validation Confidence"
+                            className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              message.response.confidence >= 0.9
+                                ? "bg-green-900/30 text-green-400 border border-green-800"
+                                : message.response.confidence >= 0.8
+                                  ? "bg-yellow-900/30 text-yellow-400 border border-yellow-800"
+                                  : "bg-red-900/30 text-red-400 border border-red-800"
+                            }`}
+                          >
+                            {(message.response.confidence * 100).toFixed(0)}% Confidence
+                          </span>
+                        )}
+                      </div>
                       <pre className="text-xs bg-gray-900 border border-gray-700 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap break-words">
                         {message.response.generated_query}
                       </pre>

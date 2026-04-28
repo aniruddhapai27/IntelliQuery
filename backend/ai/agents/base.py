@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
-from ai.llm.groq import generate_with_groq, classify_query_relevance, refine_query_with_groq
+from ai.llm.groq import generate_with_groq, classify_query_relevance, refine_query_with_groq, validate_query_with_llm
 
 logger = logging.getLogger(__name__)
 
@@ -100,39 +100,77 @@ Pandas Code:"""
         }
         return prompts.get(self.agent_type, prompts["sql"])
     
-    async def generate_query(self, natural_query: str, datasource: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    async def generate_query(self, natural_query: str, datasource: Dict[str, Any]) -> Tuple[Optional[str], str, float]:
         """
         Generate a query from natural language using Groq LLM.
         Iteratively refines the query up to MAX_REFINEMENT_ITERATIONS times
         if validation fails.
         
         Returns:
-            Tuple of (generated_query, llm_used)
+            Tuple of (generated_query, llm_used, confidence_score)
         """
         schema_context = await self.get_schema_context(datasource)
         
         result = await generate_with_groq(natural_query, self.agent_type, schema_context)
         if not result:
-            return None, "none"
+            return None, "none", 0.0
         
         self.llm_used = "groq"
         generated = self._clean_generated_query(result)
+        current_confidence = 1.0
         
         # Iterative refinement: validate and refine up to N times
         for iteration in range(MAX_REFINEMENT_ITERATIONS):
             is_valid, validation_error = self.validate_readonly(generated)
-            if is_valid:
-                logger.info(f"Query validated successfully on iteration {iteration + 1}")
-                return generated, "groq"
+            if not is_valid:
+                logger.warning(
+                    f"Query validation failed on iteration {iteration + 1}: {validation_error}. "
+                    f"Requesting LLM refinement..."
+                )
+                refined = await refine_query_with_groq(
+                    original_query=natural_query,
+                    generated_query=generated,
+                    error_message=validation_error,
+                    query_type=self.agent_type,
+                    schema_context=schema_context
+                )
+                if not refined:
+                    logger.error("LLM refinement returned nothing, stopping iterations")
+                    break
+                generated = self._clean_generated_query(refined)
+                continue
+            
+            # Step 2 Validator LLM: checking logical correctness and confidence
+            llm_validation = await validate_query_with_llm(
+                natural_query=natural_query,
+                generated_query=generated,
+                query_type=self.agent_type,
+                schema_context=schema_context
+            )
+            
+            is_llm_valid = llm_validation.get("is_valid", True)
+            confidence = llm_validation.get("confidence", 1.0)
+            llm_feedback = llm_validation.get("feedback", "")
+            
+            if is_llm_valid and confidence >= 0.8:
+                logger.info(f"Query validated successfully by LLM Validator on iteration {iteration + 1} (Confidence: {confidence})")
+                return generated, "groq", confidence
             
             logger.warning(
-                f"Query validation failed on iteration {iteration + 1}: {validation_error}. "
-                f"Requesting LLM refinement..."
+                f"LLM Validation rejected query on iteration {iteration + 1}. "
+                f"Valid: {is_llm_valid}, Confidence: {confidence}. Feedback: {llm_feedback}. "
+                f"Refining query again..."
+            )
+            
+            refinement_feedback = (
+                f"The generated query failed semantic validation (confidence: {confidence}). "
+                f"Feedback from validator: {llm_feedback}\n"
+                f"Please fix the logic and output only the corrected query."
             )
             refined = await refine_query_with_groq(
                 original_query=natural_query,
                 generated_query=generated,
-                error_message=validation_error,
+                error_message=refinement_feedback,
                 query_type=self.agent_type,
                 schema_context=schema_context
             )
@@ -140,10 +178,11 @@ Pandas Code:"""
                 logger.error("LLM refinement returned nothing, stopping iterations")
                 break
             generated = self._clean_generated_query(refined)
+            current_confidence = confidence
         
         # Return the last generated query even if validation still fails.
         # The caller (process) will run its own validation check.
-        return generated, "groq"
+        return generated, "groq", current_confidence
     
     def _clean_generated_query(self, query: str) -> str:
         """Clean up the generated query by removing markdown code blocks etc."""
@@ -180,13 +219,14 @@ Pandas Code:"""
             }
 
         # Generate query (with iterative validation refinement)
-        generated_query, llm_used = await self.generate_query(natural_query, datasource)
+        generated_query, llm_used, confidence_score = await self.generate_query(natural_query, datasource)
         
         if not generated_query:
             return {
                 "success": False,
                 "error": "Failed to generate query from natural language",
-                "llm_used": llm_used
+                "llm_used": llm_used,
+                "confidence": confidence_score
             }
         
         # Validate read-only
@@ -197,7 +237,8 @@ Pandas Code:"""
                 "generated_query": generated_query,
                 "normal_form": self.classify_normal_form(generated_query),
                 "error": f"Query validation failed: {validation_error}",
-                "llm_used": llm_used
+                "llm_used": llm_used,
+                "confidence": confidence_score
             }
         
         # Execute query with retry-on-execution-error refinement
@@ -215,7 +256,8 @@ Pandas Code:"""
                     "results": result.get("data", []),
                     "columns": result.get("columns", []),
                     "row_count": result.get("row_count", 0),
-                    "llm_used": llm_used
+                    "llm_used": llm_used,
+                    "confidence": confidence_score
                 }
 
             # Execution failed — try to refine the query
@@ -251,5 +293,6 @@ Pandas Code:"""
             "generated_query": last_query,
             "normal_form": self.classify_normal_form(last_query),
             "error": str(result),
-            "llm_used": llm_used
+            "llm_used": llm_used,
+            "confidence": confidence_score
         }

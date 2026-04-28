@@ -105,7 +105,7 @@ VALUES (%s,%s,%s,%s)
 """, order_items)
 conn.commit()
 
-print("✅ 10K+ records generated successfully")
+print("✅ Ecommerce records generated successfully")
 
 cursor.close()
 conn.close()
