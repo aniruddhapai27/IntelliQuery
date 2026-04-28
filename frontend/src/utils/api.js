@@ -65,6 +65,18 @@ export const aiAPI = {
   // Visualization endpoints
   suggestVisualizations: (data) => api.post("/ai/visualize/suggest", data),
   generateVisualization: (data) => api.post("/ai/visualize/generate", data),
+  // Export endpoints
+  exportCSV: (data) =>
+    api.post("/ai/export/csv", data, { responseType: "blob" }),
+  emailResults: (data) => api.post("/ai/export/email", data),
+  // Speech-to-text
+  speechToText: (audioBlob) => {
+    const form = new FormData();
+    form.append("file", audioBlob, "recording.webm");
+    return api.post("/ai/speech-to-text", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
 };
 
 export default api;

@@ -1,9 +1,8 @@
 from typing import Dict, Any, List, Optional
-import logging
-import re
-from fastapi import APIRouter, HTTPException, Depends, status, Query
-from fastapi.responses import StreamingResponse
 import io
+import logging
+from fastapi import APIRouter, HTTPException, Depends, status, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 
 from auth.dependencies import require_user
 from ai.schemas import (
@@ -16,8 +15,9 @@ from ai.schemas import (
     AutocompleteRequest,
     AutocompleteResponse,
     ExportCSVRequest,
-    EmailExportRequest,
-    EmailExportResponse,
+    EmailResultsRequest,
+    EmailResultsResponse,
+    SpeechToTextResponse,
 )
 from ai.ai_router import ai_router
 from ai.agents.visualization_agent import visualization_agent
@@ -28,11 +28,6 @@ from ai.history_store import (
     list_sessions,
     get_session_messages,
     delete_session,
-)
-from utils.email_service import (
-    results_to_csv_bytes,
-    send_results_email,
-    render_plotly_chart_to_png,
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -315,166 +310,6 @@ async def clear_autocomplete_cache(
 
 
 # ---------------------------------------------------------------------------
-# Export endpoints
-# ---------------------------------------------------------------------------
-
-EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
-
-
-@router.post("/export/csv")
-async def export_csv(
-    request: ExportCSVRequest,
-    user: dict = Depends(require_user),
-):
-    """
-    Export query results as a downloadable CSV file.
-
-    Accepts the results list-of-dicts returned by /ai/query.
-    Returns a streaming CSV response (UTF-8 with BOM for Excel).
-    """
-    if not request.results:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No results to export.",
-        )
-
-    csv_bytes = results_to_csv_bytes(request.results, request.columns)
-
-    filename = request.filename or "query_results.csv"
-    if not filename.endswith(".csv"):
-        filename += ".csv"
-
-    return StreamingResponse(
-        io.BytesIO(csv_bytes),
-        media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
-    )
-
-
-@router.post("/export/email", response_model=EmailExportResponse)
-async def export_email(
-    request: EmailExportRequest,
-    user: dict = Depends(require_user),
-) -> EmailExportResponse:
-    """
-    Send query results (CSV) and optional chart image to email recipients.
-
-    Validation rules:
-    - At least one recipient is required.
-    - Maximum 10 recipients per request.
-    - All recipient addresses must be valid email format.
-    - The logged-in user's own email is NOT allowed as a recipient.
-    - Results must not be empty.
-    """
-    # --- Validate recipients list ---
-    if not request.recipients:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one recipient email is required.",
-        )
-
-    if len(request.recipients) > 10:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum 10 recipients allowed per request.",
-        )
-
-    user_email = (user.get("email") or "").lower().strip()
-    cleaned_recipients: list[str] = []
-
-    for addr in request.recipients:
-        addr = addr.strip().lower()
-
-        if not EMAIL_RE.match(addr):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid email address: {addr}",
-            )
-
-        if addr == user_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You cannot send results to your own login email. Use a different recipient.",
-            )
-
-        if addr in cleaned_recipients:
-            continue  # deduplicate silently
-        cleaned_recipients.append(addr)
-
-    if not cleaned_recipients:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No valid recipient emails after processing.",
-        )
-
-    # --- Validate results ---
-    if not request.results:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No results to send. Run a query first.",
-        )
-
-    # --- Build attachments ---
-    csv_bytes = results_to_csv_bytes(request.results, request.columns)
-
-    chart_image_bytes = None
-    if request.chart_data:
-        chart_image_bytes = render_plotly_chart_to_png(request.chart_data)
-
-    # --- Compose email ---
-    query_label = request.query_context or "IntelliQuery Results"
-    subject = request.subject or f"IntelliQuery – {query_label[:80]}"
-
-    row_count = len(request.results)
-    col_count = len(request.results[0]) if request.results else 0
-
-    body_html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px;">
-        <h2 style="color:#2563eb;">IntelliQuery – Query Results</h2>
-        <p><strong>Query:</strong> {query_label}</p>
-        <p><strong>Rows:</strong> {row_count} &nbsp;|&nbsp; <strong>Columns:</strong> {col_count}</p>
-        <hr/>
-        <p>The query results are attached as a CSV file.</p>
-        {"<p>A chart visualization is also attached as a PNG image.</p>" if chart_image_bytes else ""}
-        <br/>
-        <p style="color:#6b7280;font-size:12px;">
-            Sent via <strong>IntelliQuery</strong> by {user.get("username", "a team member")}.
-        </p>
-    </div>
-    """
-
-    # --- Send ---
-    try:
-        send_results_email(
-            recipients=cleaned_recipients,
-            subject=subject,
-            body_html=body_html,
-            csv_bytes=csv_bytes,
-            chart_image_bytes=chart_image_bytes,
-        )
-    except RuntimeError as exc:
-        # SMTP not configured
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        )
-    except Exception as exc:
-        logger.error("Email send failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to send email: {str(exc)}",
-        )
-
-    return EmailExportResponse(
-        success=True,
-        message=f"Results sent to {len(cleaned_recipients)} recipient(s).",
-        recipients=cleaned_recipients,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Query History endpoints
 # ---------------------------------------------------------------------------
 
@@ -514,3 +349,232 @@ async def remove_session(
     if deleted == 0:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"success": True, "deleted_count": deleted}
+
+
+# ---------------------------------------------------------------------------
+# Export endpoints — CSV download & email results
+# ---------------------------------------------------------------------------
+
+def _results_to_csv_bytes(
+    results: List[Dict[str, Any]],
+    columns: Optional[List[str]] = None,
+) -> bytes:
+    """Convert list-of-dicts query results to CSV bytes."""
+    import pandas as pd
+
+    if not results:
+        raise ValueError("No results to export — the result set is empty.")
+
+    df = pd.DataFrame(results)
+    if columns:
+        # Keep only requested columns that actually exist
+        valid_cols = [c for c in columns if c in df.columns]
+        if valid_cols:
+            df = df[valid_cols]
+
+    buf = io.StringIO()
+    df.to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
+
+
+def _chart_to_png_bytes(chart_data: Dict[str, Any]) -> bytes:
+    """Render a Plotly JSON figure to PNG bytes using kaleido."""
+    import plotly.io as pio
+
+    fig = pio.from_json(
+        __import__("json").dumps(chart_data)
+    )
+    return fig.to_image(format="png", width=1000, height=600, scale=2)
+
+
+# ---------------------------------------------------------------------------
+# Speech-to-Text
+# ---------------------------------------------------------------------------
+
+ALLOWED_AUDIO_TYPES = {
+    "audio/webm", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav",
+    "audio/x-m4a", "audio/m4a", "audio/mp3", "audio/flac",
+    "video/webm",  # browsers sometimes label webm audio as video/webm
+}
+MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25 MB (Whisper limit)
+
+
+@router.post("/speech-to-text", response_model=SpeechToTextResponse)
+async def speech_to_text(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user),
+) -> SpeechToTextResponse:
+    """
+    Transcribe an audio file to English text using Groq Whisper.
+
+    Accepts common audio formats (webm, mp4, m4a, mp3, wav, ogg, flac).
+    Non-English speech is automatically translated to English.
+    """
+    # Validate content type (strip codec params like ";codecs=opus")
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    if content_type not in ALLOWED_AUDIO_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported audio type: {content_type}. Allowed: webm, mp4, m4a, mp3, wav, ogg, flac",
+        )
+
+    audio_bytes = await file.read()
+
+    if len(audio_bytes) > MAX_AUDIO_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Audio file too large. Maximum size is 25 MB.",
+        )
+
+    if len(audio_bytes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty audio file.",
+        )
+
+    try:
+        from ai.speech import transcribe_audio
+
+        text = await transcribe_audio(
+            file_bytes=audio_bytes,
+            filename=file.filename or "audio.webm",
+        )
+
+        if not text:
+            return SpeechToTextResponse(
+                success=False,
+                text="",
+                error="No speech detected in the audio.",
+            )
+
+        return SpeechToTextResponse(success=True, text=text)
+
+    except Exception as e:
+        logger.error("Speech-to-text endpoint error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcription failed: {str(e)}",
+        )
+
+
+@router.post("/export/csv")
+async def export_csv(
+    request: ExportCSVRequest,
+    user: dict = Depends(require_user),
+):
+    """
+    Export query results as a downloadable CSV file.
+
+    Accepts the same results payload returned by /ai/query.
+    Returns a streaming CSV download.
+    """
+    try:
+        csv_bytes = _results_to_csv_bytes(request.results, request.columns)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error("CSV export failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate CSV: {str(exc)}",
+        )
+
+    filename = request.filename or "query_results.csv"
+    # Sanitise filename
+    filename = filename.replace("/", "_").replace("\\", "_")
+    if not filename.endswith(".csv"):
+        filename += ".csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(csv_bytes)),
+        },
+    )
+
+
+@router.post("/export/email", response_model=EmailResultsResponse)
+async def email_results(
+    request: EmailResultsRequest,
+    user: dict = Depends(require_user),
+) -> EmailResultsResponse:
+    """
+    Email query results (CSV) and optional chart image to recipient addresses.
+
+    - Recipients are explicitly provided; the logged-in user's email is NOT used.
+    - Validates every email address before sending.
+    - Attaches the results as a CSV file.
+    - If chart_data (Plotly JSON) is provided, renders it to PNG and attaches it.
+    """
+    from utils.email import send_results_email
+
+    # Build CSV
+    try:
+        csv_bytes = _results_to_csv_bytes(request.results, request.columns)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error("CSV generation for email failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate CSV for email: {str(exc)}",
+        )
+
+    # Render chart to image (optional)
+    chart_image_bytes: Optional[bytes] = None
+    if request.chart_data:
+        try:
+            chart_image_bytes = _chart_to_png_bytes(request.chart_data)
+        except Exception as exc:
+            logger.warning("Chart rendering failed, sending without chart: %s", exc)
+            # Non-fatal — we still send the CSV
+
+    # Compose body
+    body = request.message or (
+        "Hi,\n\n"
+        "Please find attached your query results from IntelliQuery.\n\n"
+        "— IntelliQuery"
+    )
+
+    # Send
+    try:
+        send_results_email(
+            recipients=request.recipients,
+            subject=request.subject or "IntelliQuery — Your Query Results",
+            body_text=body,
+            csv_bytes=csv_bytes,
+            csv_filename="query_results.csv",
+            chart_image_bytes=chart_image_bytes,
+            chart_filename="chart.png",
+        )
+    except RuntimeError as exc:
+        # SMTP not configured
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error("Email sending failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to send email: {str(exc)}",
+        )
+
+    return EmailResultsResponse(
+        success=True,
+        message="Email sent successfully.",
+        recipients=request.recipients,
+    )

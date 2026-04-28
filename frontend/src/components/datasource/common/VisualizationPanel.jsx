@@ -45,7 +45,7 @@ const loadPlotly = async () => {
   return Plot;
 };
 
-export default function VisualizationPanel({ results, queryContext }) {
+export default function VisualizationPanel({ results, queryContext, onChartDataChange }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -130,6 +130,7 @@ export default function VisualizationPanel({ results, queryContext }) {
 
         if (res.data.success) {
           setChartData(res.data);
+          onChartDataChange?.(res.data.chart_data || null);
         } else {
           setError(res.data.error || "Failed to generate chart");
         }

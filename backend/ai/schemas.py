@@ -1,6 +1,7 @@
+import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class DataSourceType(str, Enum):
@@ -90,29 +91,59 @@ class AutocompleteResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Export schemas
+# Export / Email schemas
 # ---------------------------------------------------------------------------
 
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
+
 class ExportCSVRequest(BaseModel):
-    """Request schema for exporting query results as CSV."""
+    """Request schema for CSV export."""
     results: List[Dict[str, Any]]
     columns: Optional[List[str]] = None
     filename: Optional[str] = "query_results.csv"
 
 
-class EmailExportRequest(BaseModel):
-    """Request schema for emailing query results and chart to recipients."""
+class EmailResultsRequest(BaseModel):
+    """Request schema for emailing results + chart to recipients."""
     recipients: List[str]
     results: List[Dict[str, Any]]
     columns: Optional[List[str]] = None
     chart_data: Optional[Dict[str, Any]] = None  # Plotly JSON figure
     query_context: Optional[str] = None  # Original natural language query
-    subject: Optional[str] = None  # Custom email subject
+    subject: Optional[str] = "IntelliQuery — Your Query Results"
+    message: Optional[str] = None
+
+    @field_validator("recipients")
+    @classmethod
+    def validate_recipients(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("At least one recipient email address is required.")
+        if len(v) > 20:
+            raise ValueError("Cannot send to more than 20 recipients at once.")
+        cleaned: List[str] = []
+        for addr in v:
+            addr = addr.strip().lower()
+            if not addr:
+                continue
+            if not _EMAIL_RE.match(addr):
+                raise ValueError(f"Invalid email address: {addr}")
+            cleaned.append(addr)
+        if not cleaned:
+            raise ValueError("No valid email addresses provided.")
+        return cleaned
 
 
-class EmailExportResponse(BaseModel):
-    """Response schema for email export."""
+class EmailResultsResponse(BaseModel):
+    """Response schema for email sending."""
     success: bool
     message: str
     recipients: List[str]
+    error: Optional[str] = None
+
+
+class SpeechToTextResponse(BaseModel):
+    """Response schema for speech-to-text transcription."""
+    success: bool
+    text: str
     error: Optional[str] = None
